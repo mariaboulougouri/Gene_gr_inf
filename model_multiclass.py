@@ -20,27 +20,29 @@ num_inp_ft = 1
 # command line arguments 
 parser = argparse.ArgumentParser() 
 parser.add_argument("--adj_init", type=str, default='Spearman', help="Adjacency matrix initialization")
+parser.add_argument("--corrth", type=int, default=1, help="No. of stdevs to threshold adj. matrix")
 parser.add_argument("--ffun_alg", type=str, default='mlp', help="Graph function algorithm - classification")
 parser.add_argument("--gfun_alg", type=str, default='gcn', help="Graph function algorithm - diffusion")
 parser.add_argument("--bs", type=int, default=1, help="Batch size")
 parser.add_argument("--lr", type=float, default=1e-4, help="Learning rate")
-parser.add_argument("--num_k", type=int, default=5, help="Number of edges to choose")
+parser.add_argument("--num_nodes", type=int, default=32, help="Number of nodes")
 parser.add_argument("--cancer_type", type=str, default='coadread', help="what cancer type to use") # coadred, brca, luad
 parser.add_argument("--label", type=str, default='pathological_stage', help="which label to classify") # follow_up, venous, lymph, history
 parser.add_argument("--edge_perc", type=float, default=12.5, help="percentage edges to keep globally")
 args = parser.parse_args()
 
+corrth = args.corrth
 bs = args.bs
 lr = args.lr
 adj_init = args.adj_init # None, Pearson, Spearman, Zeros, Ones
 ffun_alg = args.ffun_alg # mlp, gcn, gat
 gfun_alg = args.gfun_alg # sage, gcn, gat
 label_arg = args.label
-num_nodes = 32
+num_nodes = args.num_nodes
 
 gcn_layers = [64, 32]
 
-dataset = PatientDataset(adj_init, label_arg, args.cancer_type)
+dataset = PatientDataset(adj_init, label_arg, args.cancer_type, corrth)
 # get first sample
 sample = dataset[0]
 num_genes = sample.x.shape[1]
@@ -84,7 +86,7 @@ for train_idx, test_idx in kfold.split(np.zeros(len(dataset)), dataset.labels):
     save_loc = '/rcp/boulougo/DGM/saved_models/' + model_name
 
     # train model
-    model, result = trainGCN(num_nodes, tot_epochs, bs, lr, save_loc, wandb_logger, train_ds, val_ds, test_ds, dropout_val, ffun_alg, gfun_alg, fold_num, initial_adj, args.num_k, args.edge_perc, label_arg, int(dataset.num_outs), adj_init, dataset.weights, dataset.num_genes, args.cancer_type, f)
+    model, result = trainGCN(num_nodes, tot_epochs, bs, lr, save_loc, wandb_logger, train_ds, val_ds, test_ds, dropout_val, ffun_alg, gfun_alg, fold_num, initial_adj, args.edge_perc, label_arg, int(dataset.num_outs), adj_init, dataset.weights, dataset.num_genes, args.cancer_type, f)
 
     f1_foldwise.append(result['test'][0]['test_f1'])
     acc_foldwise.append(result['test'][0]['test_acc'])

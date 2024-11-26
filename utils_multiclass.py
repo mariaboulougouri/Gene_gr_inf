@@ -20,7 +20,7 @@ if (not os.environ.get("USE_KEOPS")) or os.environ.get("USE_KEOPS")=="False":
     from layers_dense import *
 
 class PatientDataset(Dataset):
-    def __init__(self, adj_init, label_arg, cancer_type):
+    def __init__(self, adj_init, label_arg, cancer_type, corrth):
         super().__init__()
 
         if cancer_type == 'coadread':
@@ -154,8 +154,8 @@ class PatientDataset(Dataset):
             new_adj_matrix = new_adj_matrix.to_numpy()
             mean = np.mean(p_mat) 
             st = np.std(p_mat)
-            lth = mean-st 
-            rth = mean+st
+            lth = mean- corrth*st 
+            rth = mean+ corrth*st
             new_adj_matrix[(new_adj_matrix < lth) | (new_adj_matrix > rth)] = 1
             new_adj_matrix[(new_adj_matrix >= lth) & (new_adj_matrix <= rth)] = 0
             pearson_adj_matrix_sparse = sparse.csr_matrix(new_adj_matrix)
@@ -168,8 +168,8 @@ class PatientDataset(Dataset):
             new_adj_matrix = new_adj_matrix.to_numpy()
             mean = np.mean(p_mat) 
             st = np.std(p_mat)
-            lth = mean-st 
-            rth = mean+st
+            lth = mean- corrth*st 
+            rth = mean+ corrth*st
             new_adj_matrix[(new_adj_matrix < lth) | (new_adj_matrix > rth)] = 1
             new_adj_matrix[(new_adj_matrix >= lth) & (new_adj_matrix <= rth)] = 0
             spearman_adj_matrix_sparse = sparse.csr_matrix(new_adj_matrix)
@@ -466,7 +466,7 @@ class DGM_Model_Lightning(L.LightningModule):
         self.true_list = []
         self.preds_list = []
 
-def trainGCN(num_nodes, num_epochs, bs, lr, save_loc, wandb_logger, train_loader, val_loader, test_loader, dropout_val, ffun_alg, gfun_alg, fold_num, initial_adj, num_k, edge_perc, label_arg, num_classes, adj_init, class_weights, num_genes, cancer_type, out_file):
+def trainGCN(num_nodes, num_epochs, bs, lr, save_loc, wandb_logger, train_loader, val_loader, test_loader, dropout_val, ffun_alg, gfun_alg, fold_num, initial_adj, edge_perc, label_arg, num_classes, adj_init, class_weights, num_genes, cancer_type, out_file):
     # Create a PyTorch Lightning trainer with the generation callback
     trainer = L.Trainer(
         default_root_dir=save_loc,
@@ -500,7 +500,6 @@ def trainGCN(num_nodes, num_epochs, bs, lr, save_loc, wandb_logger, train_loader
     hparams['dropout'] = dropout_val
     hparams['lr'] = lr
     hparams['test_eval'] = 10
-    hparams['k'] = num_k
     hparams['pooling'] = 'add'
     hparams['distance'] = 'euclidean'
     hparams['num_epochs'] = num_epochs
