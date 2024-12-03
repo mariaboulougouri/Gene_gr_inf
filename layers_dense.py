@@ -1,12 +1,15 @@
 import torch
-import numpy
+import numpy as np
 from layers import *
 
 from torch.nn import Module, ModuleList, Sequential
 from torch import nn
+from scipy import sparse
+from torch_geometric.utils.convert import from_scipy_sparse_matrix
+
 
 class DGM_d(nn.Module):
-    def __init__(self, embed_f, k=5, distance=pairwise_euclidean_distances, sparse=True):
+    def __init__(self, embed_f, distance=pairwise_euclidean_distances, sparse=True, perc=25):
         super(DGM_d, self).__init__()
         
         self.sparse=sparse
@@ -15,7 +18,7 @@ class DGM_d(nn.Module):
         self.embed_f = embed_f
         self.centroid=None
         self.scale=None
-        self.k = k
+        self.perc = perc
         
         self.debug=False
         if distance == 'euclidean':
@@ -23,50 +26,31 @@ class DGM_d(nn.Module):
         else:
             self.distance = pairwise_poincare_distances
         
-    def forward(self, x, A, not_used=None, fixedges=None):
-        print("x: ", x.shape)
+    def forward(self, x, A):
         x = self.embed_f(x,A)  
         
         if self.training:
-            if fixedges is not None:                
-                return x, fixedges, torch.zeros(fixedges.shape[0],fixedges.shape[-1]//self.k,self.k,dtype=torch.float,device=x.device)
-            
             D, _x = self.distance(x)
-           
-            #sampling here
-            edges_hat, logprobs = self.sample_without_replacement(D)
+            edges_hat = self.topPercEdges(D)
+
+            return x, edges_hat
                 
         else:
-            with torch.no_grad():
-                if fixedges is not None:                
-                    return x, fixedges, torch.zeros(fixedges.shape[0],fixedges.shape[-1]//self.k,self.k,dtype=torch.float,device=x.device)
-                D, _x = self.distance(x)
-
-                #sampling here
-                edges_hat, logprobs = self.sample_without_replacement(D)
-
-              
-        if self.debug:
-            self.D = D
-            self.edges_hat=edges_hat
-            self.logprobs=logprobs
-            self.x=x
-
-        return x, edges_hat, logprobs
+            with torch.no_grad():           
+                return x, A
     
 
-    def sample_without_replacement(self, logits):
-        b,n,_ = logits.shape
-#         logits = logits * torch.exp(self.temperature*10)
-        logits = logits * torch.exp(torch.clamp(self.temperature,-5,5))
+    def topPercEdges(self, D):
+        D = torch.squeeze(D, dim=0)
+        D = D.detach().cpu().numpy()
         
-        q = torch.rand_like(logits) + 1e-8
-        lq = (logits-torch.log(-torch.log(q)))
-        logprobs, indices = torch.topk(-lq,self.k)  
-    
-        rows = torch.arange(n).view(1,n,1).to(logits.device).repeat(b,1,self.k)
-        edges = torch.stack((indices.view(b,-1),rows.view(b,-1)),-2)
-        
-        if self.sparse:
-            return (edges+(torch.arange(b).to(logits.device)*n)[:,None,None]).transpose(0,1).reshape(2,-1), logprobs
-        return edges, logprobs
+        # least 25% percentile value
+        q_val = np.percentile(D, 100-self.perc)
+        D = np.where(D >= q_val, 1, 0)
+
+        # convert this into an edge list
+        adj_mat = sparse.csr_matrix(D)
+        edges, edge_w = from_scipy_sparse_matrix(adj_mat)
+        edges = edges.long().to(torch.device('cuda'))
+
+        return edges

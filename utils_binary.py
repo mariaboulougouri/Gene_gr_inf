@@ -48,7 +48,7 @@ class PatientDataset(Dataset):
             metadata = 'patient.person_neoplasm_cancer_status' # one example
 
         # data_path = 'data_dgm/' + folder + '/'
-        data_path = '/rcp/boulougo/DGM/Raw_data/' + folder + '/'
+        data_path = '../data_dgm/' + folder + '/'
         df_labels = pd.read_csv(data_path + "filtered_metaclinical.txt", sep= '\t', index_col=0)   
 
         df = pd.read_csv(data_path + "filtered_rnaseq_zerosandlowvar_removed.txt", sep= '\t', index_col=0, header=0)
@@ -182,15 +182,15 @@ class DGM_Model_Lightning(L.LightningModule):
         for i,(dgm_l,conv_l) in enumerate(zip(dgm_layers,conv_layers)):
             if len(dgm_l)>0:
                 if 'ffun' not in list(hparams.keys()) or hparams['ffun'] == 'gcn':
-                    self.graph_f.append(DGM_d(GCNConv(dgm_l[0], dgm_l[-1]), k=hparams['k'], distance=hparams['distance'], perc = self.edge_perc))
+                    self.graph_f.append(DGM_d(GCNConv(dgm_l[0], dgm_l[-1]), distance=hparams['distance'], perc = self.edge_perc))
                 if hparams['ffun'] == 'sage':
-                    self.graph_f.append(DGM_d(SAGEConv(dgm_l[0], dgm_l[-1]), k=hparams['k'], distance=hparams['distance'], perc = self.edge_perc))
+                    self.graph_f.append(DGM_d(SAGEConv(dgm_l[0], dgm_l[-1]), distance=hparams['distance'], perc = self.edge_perc))
                 if hparams['ffun'] == 'gat':
-                    self.graph_f.append(DGM_d(GATConv(dgm_l[0], dgm_l[-1]), k=hparams['k'], distance=hparams['distance'], perc = self.edge_perc))
+                    self.graph_f.append(DGM_d(GATConv(dgm_l[0], dgm_l[-1]), distance=hparams['distance'], perc = self.edge_perc))
                 if hparams['ffun'] == 'mlp':
-                    self.graph_f.append(DGM_d(MLP(dgm_l), k=hparams['k'], distance=hparams['distance'], perc = self.edge_perc))
+                    self.graph_f.append(DGM_d(MLP(dgm_l), distance=hparams['distance'], perc = self.edge_perc))
                 if hparams['ffun'] == 'knn':
-                    self.graph_f.append(DGM_d(Identity(retparam=0), k=hparams['k'], distance=hparams['distance'], perc = self.edge_perc))
+                    self.graph_f.append(DGM_d(Identity(retparam=0), distance=hparams['distance'], perc = self.edge_perc))
             else:
                 self.graph_f.append(Identity())
             
@@ -274,11 +274,14 @@ class DGM_Model_Lightning(L.LightningModule):
         data = train_batch
         X = data.x
         y = data.y
-        y = y.unsqueeze(0)
+        y = torch.tensor([torch.argmax(y)]).cuda().float()
         
         pred = self(X, self.edges, mode='train')
 
         w_p = torch.FloatTensor([self.pos_weight]).cuda()
+
+        pred = pred.unsqueeze(0)
+        y = y.unsqueeze(0)
 
         loss = torch.nn.functional.binary_cross_entropy_with_logits(pred,y, pos_weight=w_p)
         loss.backward()
@@ -304,10 +307,13 @@ class DGM_Model_Lightning(L.LightningModule):
         data = train_batch
         X = data.x
         y = data.y
-        y = y.unsqueeze(0)
+        y = torch.tensor([torch.argmax(y)]).cuda().float()
         
         pred = self(X, self.edges, mode='val')
         w_p = torch.FloatTensor([self.pos_weight]).cuda()
+
+        pred = pred.unsqueeze(0)
+        y = y.unsqueeze(0)
         loss = torch.nn.functional.binary_cross_entropy_with_logits(pred,y, pos_weight=w_p)
         if pred > 0.5:
             pred_thresh = 1
@@ -355,12 +361,14 @@ class DGM_Model_Lightning(L.LightningModule):
         data = train_batch
         X = data.x
         y = data.y
-        y = y.unsqueeze(0)
+        y = torch.tensor([torch.argmax(y)]).cuda().float()
 
         self.best_edges = torch.load("DGM/adj_matrices/" + str(self.cancer_type) + '/best_edges_' + str(self.label_arg) + "_" + str(self.adj_init) + "_" + str(self.fold_num) + ".pt", weights_only=True).to(torch.device('cuda:0'))
      
         pred = self(X, self.best_edges, mode='test')
         w_p = torch.FloatTensor([self.pos_weight]).cuda()
+        pred = pred.unsqueeze(0)
+        y = y.unsqueeze(0)
         loss = torch.nn.functional.binary_cross_entropy_with_logits(pred,y, pos_weight=w_p)
         if pred > 0.5:
             pred_thresh = 1
@@ -407,11 +415,11 @@ def trainGCN(num_nodes, num_epochs, bs, lr, save_loc, wandb_logger, train_loader
         logger=wandb_logger,
         callbacks=[
             L.pytorch.callbacks.ModelCheckpoint(dirpath=save_loc,
-                monitor='val_f1',
+                monitor='val_loss',
                 save_top_k=1,
-                mode='max'),
+                mode='min'),
             L.pytorch.callbacks.LearningRateMonitor("epoch"),
-            L.pytorch.callbacks.EarlyStopping(monitor="val_f1", patience=10),
+            L.pytorch.callbacks.EarlyStopping(monitor="val_loss", patience=10),
         ],
     )
     trainer.logger._log_graph = True  # If True, we plot the computation graph in tensorboard
